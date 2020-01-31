@@ -1,6 +1,10 @@
-The tutorial code and Python/Colab notebook(s) are released under 
-the Creative Commons Attribution 4.0 license agreement (also called 
-CC BY 4.0). 
+The following materials:
+* Non-framework files (i.e. all except ones in `tensorflow`, 
+  `third_party` and `mbed-os` directories, which maybe licenced 
+  differently by their authors)
+* Any referenced or included Python/Colab notebook(s) at the top level
+are released under the Creative Commons Attribution 4.0 license 
+agreement (also called CC BY 4.0). 
 Use of this data implies agreement with the terms below. See also:
 http://creativecommons.org/licenses/by/4.0/legalcode
 

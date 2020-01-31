@@ -5,7 +5,7 @@
 
 #include "mbed.h"
 #include "platform/mbed_thread.h"
-
+#include "tensorflow/lite/micro/examples/micro_speech/main_functions.h"
 
 // Blinking rate in milliseconds
 #define BLINKING_RATE_MS                                                    500
@@ -62,29 +62,30 @@ static void MX_GPIO_Init(void)
 
 int main()
 {
-	pc.printf("main() begun\r\n");
+  pc.printf("main() begun\r\n");
 
-	MX_GPIO_Init();
-  	MX_I2S1_Init();
-    // Initialise the digital pin LEDX as an output
-    DigitalOut led(LED2);
+  MX_GPIO_Init();
+  MX_I2S1_Init();
+  // Initialise the digital pin LEDX as an output
+  DigitalOut led(LED2);
 
-    pc.printf("System initialised\r\n");
+  setup();
 
+  pc.printf("System initialised\r\n");
 
+  while (true) {
+      led = !led;
+      pc.printf("LED state changed\r\n");
+      //thread_sleep_for(BLINKING_RATE_MS);
+      loop();
 
-    while (true) {
-        led = !led;
-        pc.printf("LED state changed\r\n");
-        thread_sleep_for(BLINKING_RATE_MS);
-
-        uint16_t data_in[2];
-        HAL_StatusTypeDef result = HAL_I2S_Receive(&hi2s1, data_in, 2, 100);
-        //pc.printf("Status %d\r\n", result);
-		if (result == HAL_OK) {
-			volatile int32_t data_full = (int32_t) data_in[0] << 16 | data_in[1];
-			// volatile int16_t data_short = (int16_t) data_in[0];
-			pc.printf("%d \r\n", data_full);
-		}
-    }
+      uint16_t data_in[2];
+      HAL_StatusTypeDef result = HAL_I2S_Receive(&hi2s1, data_in, 2, 100);
+      pc.printf("Status %d\r\n", result);
+      if (result == HAL_OK) {
+        volatile int32_t data_full = (int32_t) data_in[0] << 16 | data_in[1];
+        // volatile int16_t data_short = (int16_t) data_in[0];
+        pc.printf("%d \r\n", data_full);
+  		}
+  }
 }
