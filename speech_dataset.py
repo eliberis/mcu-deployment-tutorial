@@ -368,6 +368,31 @@ class AudioProcessor(object):
         data = data.map(apply_preprocessing, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         return data
 
+    def load_sample(self, file, foreground_volume=1.0, sample_rate=None):
+        settings = self.model_settings
+        if sample_rate is None:
+            sample_rate = settings['sample_rate']
+        window_size_ms = (settings['window_size_samples'] * 1000) / sample_rate
+        window_step_ms = (settings['window_stride_samples'] * 1000) / sample_rate
+        num_channels = settings['fingerprint_width']
+
+        wav_loader = tf.io.read_file(file)
+        wav_decoder = tf.audio.decode_wav(wav_loader, desired_channels=1)
+        scaled_foreground = tf.multiply(wav_decoder.audio, foreground_volume)
+        clipped_foreground = tf.clip_by_value(scaled_foreground, -1.0, 1.0)
+        int16_input = tf.cast(tf.multiply(clipped_foreground, 32768), tf.int16)
+
+        micro_frontend = frontend_op.audio_microfrontend(
+                int16_input,
+                sample_rate=sample_rate,
+                window_size=window_size_ms,
+                window_step=window_step_ms,
+                num_channels=num_channels,
+                out_scale=1,
+                out_type=tf.float32)
+        spectrogram = tf.multiply(micro_frontend, (10.0 / 256.0))
+        return tf.expand_dims(spectrogram, axis=-1)
+
 
 class SpeechDataset:
     """Wraps AudioProcessor from the original implementation into something that hides invocation complexity a bit."""
@@ -445,6 +470,8 @@ class SpeechDataset:
     def look_up_word(self, index):
         return self.prepared_words_list[index]
 
+    def load_sample(self, file, foreground_volume=1.0, sample_rate=None):
+        return self.audio_processor.load_sample(file, foreground_volume, sample_rate)
 
 if __name__ == "__main__":
     pass
