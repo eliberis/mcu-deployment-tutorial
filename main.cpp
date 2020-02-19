@@ -12,7 +12,6 @@
 #include "tensorflow/lite/micro/examples/micro_speech/feature_provider.h"
 #include "tensorflow/lite/micro/examples/micro_speech/micro_features/micro_model_settings.h"
 #include "tensorflow/lite/micro/examples/micro_speech/micro_features/tiny_conv_micro_features_model_data.h"
-#include "tensorflow/lite/micro/examples/micro_speech/recognize_commands.h"
 #include "tensorflow/lite/micro/kernels/micro_ops.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -27,14 +26,16 @@ const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* model_input = nullptr;
 FeatureProvider* feature_provider = nullptr;
-RecognizeCommands* recognizer = nullptr;
-int32_t previous_time = 0;
 
 // Create an area of memory to use for input, output, and intermediate arrays.
 // The size of this will depend on the model you're using, and may need to be
 // determined by experimentation.
 constexpr int kTensorArenaSize = 50 * 1024;
 uint8_t tensor_arena[kTensorArenaSize];
+
+int16_t g_dummy_audio_data[kMaxAudioSampleSize];
+DigitalOut recording_led(LED2);
+DigitalOut computing_led(LED3);
 
 }  // namespace
 
@@ -43,55 +44,47 @@ void setup() {
   static tflite::MicroErrorReporter micro_error_reporter;
   error_reporter = &micro_error_reporter;
 
-  // RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-  // PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2S;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLP_DIV2;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
-  // PeriphClkInitStruct.PLLI2SDivQ = 1;
-  // PeriphClkInitStruct.I2sClockSelection = RCC_I2SCLKSOURCE_PLLI2S;
-  // if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-  // {
-  //   error_reporter->Report("HAL_RCCEx_PeriphCLKConfig");
-  // }
+  for (int i = 0; i < kMaxAudioSampleSize; i++) {
+    g_dummy_audio_data[i] = 0;
+  }
 
-  //   // Enable GPIO port clock
-  // // __HAL_RCC_GPIOA_CLK_ENABLE();
-  // __HAL_RCC_GPIOA_CLK_ENABLE();
-  // pin_function(PA_7, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO));
-  // pin_mode(PA_7, PullNone);
+  // Initialise the I2S subsystem
 
-  
-  // pin_function(PA_5, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF14_USB));
-  // __HAL_RCC_GPIOC_CLK_ENABLE();
+  // Set up clocks
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2S;
+  PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
+  PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLP_DIV2;
+  PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
+  PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
+  PeriphClkInitStruct.PLLI2SDivQ = 1;
+  PeriphClkInitStruct.I2sClockSelection = RCC_I2SCLKSOURCE_PLLI2S;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+  {
+    error_reporter->Report("HAL_RCCEx_PeriphCLKConfig");
+  }
 
+  // Enable GPIO port clock
+  __SPI1_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  pin_function(PA_7, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
+  pin_function(PA_5, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
+  pin_function(PA_4, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
 
   // Set up I2S handles
-  // hi2s1.Instance = SPI1;
-  // hi2s1.Init.Mode = I2S_MODE_MASTER_RX;
-  // hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
-  // hi2s1.Init.DataFormat = I2S_DATAFORMAT_24B;
-  // hi2s1.Init.MCLKOutput = I2S_MCLKOUTPUT_DISABLE; // TODO: ENABLE?
-  // hi2s1.Init.AudioFreq = I2S_AUDIOFREQ_16K;
-  // hi2s1.Init.CPOL = I2S_CPOL_LOW;
-  // hi2s1.Init.FirstBit = I2S_FIRSTBIT_MSB;
-  // hi2s1.Init.WSInversion = I2S_WS_INVERSION_DISABLE;
-  // hi2s1.Init.Data24BitAlignment = I2S_DATA_24BIT_ALIGNMENT_RIGHT;
-  // hi2s1.Init.MasterKeepIOState = I2S_MASTER_KEEP_IO_STATE_DISABLE;
-  // hi2s1.Instance = SPI1;
-  // hi2s1.Init.Mode = I2S_MODE_MASTER_RX;
-  // hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
-  // hi2s1.Init.DataFormat = I2S_DATAFORMAT_24B;
-  // hi2s1.Init.MCLKOutput = I2S_MCLKOUTPUT_ENABLE;
-  // hi2s1.Init.AudioFreq = I2S_AUDIOFREQ_16K;
-  // hi2s1.Init.CPOL = I2S_CPOL_LOW;
-  // hi2s1.Init.ClockSource = I2S_CLOCK_PLL;
-  // if (HAL_I2S_Init(&hi2s1) != HAL_OK) {
-  //   error_reporter->Report("HAL_I2S_Init error.");
-  // }
-
-
+  hi2s1.Instance = SPI1;
+  hi2s1.Init.Mode = I2S_MODE_MASTER_RX;
+  hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
+  hi2s1.Init.DataFormat = I2S_DATAFORMAT_24B;
+  hi2s1.Init.MCLKOutput = I2S_MCLKOUTPUT_ENABLE;
+  hi2s1.Init.AudioFreq = I2S_AUDIOFREQ_16K;
+  hi2s1.Init.CPOL = I2S_CPOL_LOW;
+  hi2s1.Init.ClockSource = I2S_CLOCK_PLL;
+  if (HAL_I2S_Init(&hi2s1) != HAL_OK) {
+    error_reporter->Report("HAL_I2S_Init error.");
+  }
 
   // Set up Tensorflow Lite Micro
   model = tflite::GetModel(g_tiny_conv_micro_features_model_data);
@@ -157,28 +150,15 @@ void setup() {
   static FeatureProvider static_feature_provider(kFeatureElementCount,
                                                  model_input->data.uint8);
   feature_provider = &static_feature_provider;
-
-  static RecognizeCommands static_recognizer(error_reporter);
-  recognizer = &static_recognizer;
-
-  previous_time = 0;
 }
 
-// The name of this function is important for Arduino compatibility.
-void loop() {
-  // Fetch the spectrogram for the current time.
-  const int32_t current_time = LatestAudioTimestamp();
+void infer() {
+  // Fetch the spectrogram.
   int how_many_new_slices = 0;
   TfLiteStatus feature_status = feature_provider->PopulateFeatureData(
-      error_reporter, previous_time, current_time, &how_many_new_slices);
+      error_reporter, 0, 1000, &how_many_new_slices);
   if (feature_status != kTfLiteOk) {
     error_reporter->Report("Feature generation failed");
-    return;
-  }
-  previous_time = current_time;
-  // If no new audio samples have been received since last time, don't bother
-  // running the network model.
-  if (how_many_new_slices == 0) {
     return;
   }
 
@@ -191,122 +171,84 @@ void loop() {
 
   // Obtain a pointer to the output tensor
   TfLiteTensor* output = interpreter->output(0);
-  // Determine whether a command was recognized based on the output of inference
-  const char* found_command = nullptr;
-  uint8_t score = 0;
-  bool is_new_command = false;
-  TfLiteStatus process_status = recognizer->ProcessLatestResults(
-      output, current_time, &found_command, &score, &is_new_command);
-  if (process_status != kTfLiteOk) {
-    error_reporter->Report("RecognizeCommands::ProcessLatestResults() failed");
+
+  if ((output->dims->size != 2) ||
+      (output->dims->data[0] != 1) ||
+      (output->dims->data[1] != kCategoryCount)) {
+    error_reporter->Report(
+        "The results for recognition should contain %d elements, but there are "
+        "%d in an %d-dimensional shape",
+        kCategoryCount, output->dims->data[1],
+        output->dims->size);
     return;
   }
-  // Do something based on the recognized command. The default implementation
-  // just prints to the error console, but you should replace this with your
-  // own function for a real application.
-  RespondToCommand(error_reporter, current_time, found_command, score,
-                   is_new_command);
+
+  if (output->type != kTfLiteUInt8) {
+    error_reporter->Report(
+        "The results for recognition should be uint8 elements, but are %d",
+        output->type);
+    return;
+  }
+
+  int current_top_index = 0;
+  int32_t current_top_score = 0;
+  for (int i = 0; i < kCategoryCount; ++i) {
+    uint8_t score = output->data.uint8[i];
+    error_reporter->Report("%s: %d", kCategoryLabels[i], score);
+    if (score > current_top_score) {
+      current_top_score = score;
+      current_top_index = i;
+    }
+  }
+  const char* current_top_label = kCategoryLabels[current_top_index];
+  error_reporter->Report("Heard: %s", current_top_label);
 }
 
 namespace {
-int16_t g_dummy_audio_data[kMaxAudioSampleSize];
-int32_t g_latest_audio_timestamp = 0;
+// recording 1s + 200ms at the start, which will be discarded
+const int recording_size = 16000 * 6 / 5; 
+int16_t recording[recording_size];
 }  // namespace
 
 TfLiteStatus GetAudioSamples(tflite::ErrorReporter* error_reporter,
                              int start_ms, int duration_ms,
                              int* audio_samples_size, int16_t** audio_samples) {
-  for (int i = 0; i < kMaxAudioSampleSize; ++i) {
-    g_dummy_audio_data[i] = 0;
+  
+  int start_idx = 16 * start_ms + 3200;
+  for (int i = 0; i < 16 * duration_ms; i++) {
+    g_dummy_audio_data[i] = recording[start_idx + i];
   }
   *audio_samples_size = kMaxAudioSampleSize;
   *audio_samples = g_dummy_audio_data;
   return kTfLiteOk;
 }
 
-int32_t LatestAudioTimestamp() {
-  g_latest_audio_timestamp += 100;
-  return g_latest_audio_timestamp;
-}
-
-void RespondToCommand(tflite::ErrorReporter* error_reporter,
-                      int32_t current_time, const char* found_command,
-                      uint8_t score, bool is_new_command) {
-  //if (is_new_command) {
-    error_reporter->Report("Heard %s (%d) @%dms", found_command, score,
-                           current_time);
-  //}
-}
-
-
-void SystemClock_Config(void)
-{
-  // RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  // RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  // RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-
-  // /** Macro to configure the PLL multiplication factor 
-  // */
-  // __HAL_RCC_PLL_PLLM_CONFIG(16);
-  // /** Macro to configure the PLL clock source 
-  // */
-  // __HAL_RCC_PLL_PLLSOURCE_CONFIG(RCC_PLLSOURCE_HSI);
-  // /** Configure the main internal regulator output voltage 
-  // */
-  // __HAL_RCC_PWR_CLK_ENABLE();
-  // __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
-  // /** Initializes the CPU, AHB and APB busses clocks 
-  // */
-  // RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  // RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  // RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  // RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  // RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  // RCC_OscInitStruct.PLL.PLLM = 16;
-  // if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  // {
-  //   error_reporter->Report("HAL_RCC_OscConfig");
-  // }
-  // /** Initializes the CPU, AHB and APB busses clocks 
-  // */
-  // RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-  //                             |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  // RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-  // RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  // RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  // RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-
-  // if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  // {
-  //   error_reporter->Report("HAL_RCC_ClockConfig");
-  // }
-  // PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2S;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLP_DIV2;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
-  // PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
-  // PeriphClkInitStruct.PLLI2SDivQ = 1;
-  // PeriphClkInitStruct.I2sClockSelection = RCC_I2SCLKSOURCE_PLLI2S;
-  // if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-  // {
-  //   error_reporter->Report("HAL_RCCEx_PeriphCLKConfig");
-  // }
+void record_audio_segment() {
+    uint16_t data_in[4];
+    int i = 0;
+    while (i < recording_size) {
+        HAL_StatusTypeDef result = HAL_I2S_Receive(&hi2s1, data_in, 2, 100);
+        if (result == HAL_OK) {
+            // (we discarded 2 bits by keeping 16 out of 18 data bits)
+            recording[i] = data_in[0] << 2;
+            i++;
+        }
+    }
 }
 
 int main() {
-  //SystemClock_Config();
-  setup();
+    setup();
 
-  while (true) {
-      loop();
+    recording_led = true;
+    record_audio_segment();
+    recording_led = false;
 
-      // uint16_t data_in[2];
-      // HAL_StatusTypeDef result = HAL_I2S_Receive(&hi2s1, data_in, 2, 100);
-      // error_reporter->Report("Status %d\r\n", result);
-      // if (result == HAL_OK) {
-      //   volatile int32_t data_full = (int32_t) data_in[0] << 16 | data_in[1];
-      //   // volatile int16_t data_short = (int16_t) data_in[0];
-      //   error_reporter->Report("%d \r\n", data_full);
-      // }
-  }
+    computing_led = true;
+    infer();
+    computing_led = false;
+
+    // Busy loop until reset
+    while(true) {}
+
+    return 0;
 }
