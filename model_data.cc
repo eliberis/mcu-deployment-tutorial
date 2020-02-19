@@ -12,12 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
-// Automatically created from a TensorFlow Lite flatbuffer using the command:
-// xxd -i tiny_conv.tflite > tiny_conv_simple_features_model_data.cc
-// See the README for a full description of the creation process.
-
-#include "tensorflow/lite/micro/examples/micro_speech/micro_features/tiny_conv_micro_features_model_data.h"
+#include "model_data.h"
 
 // We need to keep the data array aligned on some architectures.
 #ifdef __has_attribute
@@ -32,7 +27,7 @@ limitations under the License.
 #endif
 
 const unsigned char
-    g_tiny_conv_micro_features_model_data[] DATA_ALIGN_ATTRIBUTE = {
+    g_model_data[] DATA_ALIGN_ATTRIBUTE = {
   0x0c, 0x00, 0x00, 0x00, 0x54, 0x46, 0x4c, 0x33, 0x00, 0x00, 0x00, 0x00,
   0x86, 0xff, 0xff, 0xff, 0x03, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
   0x20, 0x00, 0x00, 0x00, 0x54, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
@@ -1576,4 +1571,4 @@ const unsigned char
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x04, 0x00,
   0x04, 0x00, 0x00, 0x00
 };
-const int g_tiny_conv_micro_features_model_data_len = 18496;
+const int g_model_data_len = 18496;
