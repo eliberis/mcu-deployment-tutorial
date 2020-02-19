@@ -12,9 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
-#ifndef TENSORFLOW_LITE_MICRO_EXAMPLES_MICRO_SPEECH_MICRO_FEATURES_MICRO_MODEL_SETTINGS_H_
-#define TENSORFLOW_LITE_MICRO_EXAMPLES_MICRO_SPEECH_MICRO_FEATURES_MICRO_MODEL_SETTINGS_H_
+#pragma once
 
 // Keeping these as constant expressions allow us to allocate fixed-sized arrays
 // on the stack for our working memory.
@@ -37,5 +35,3 @@ constexpr int kCategoryCount = 4;
 constexpr int kSilenceIndex = 0;
 constexpr int kUnknownIndex = 1;
 extern const char* kCategoryLabels[kCategoryCount];
-
-#endif  // TENSORFLOW_LITE_MICRO_EXAMPLES_MICRO_SPEECH_MICRO_FEATURES_MICRO_MODEL_SETTINGS_H_

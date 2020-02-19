@@ -1,10 +1,6 @@
 #include "audio_recorder.h"
 
-namespace {
-    I2S_HandleTypeDef hi2s1;
-}
-
-int audio_init() {
+AudioRecorder::AudioRecorder(tflite::ErrorReporter* error_reporter) {
     // Initialise the I2S subsystem
 
     // Set up clocks
@@ -17,7 +13,7 @@ int audio_init() {
     PeriphClkInitStruct.PLLI2SDivQ = 1;
     PeriphClkInitStruct.I2sClockSelection = RCC_I2SCLKSOURCE_PLLI2S;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
-        return 1;
+        error_reporter->Report("HAL_RCCEx_PeriphCLKConfig fail");
     }
 
     // Enable GPIO port clock
@@ -39,12 +35,11 @@ int audio_init() {
     hi2s1.Init.CPOL = I2S_CPOL_LOW;
     hi2s1.Init.ClockSource = I2S_CLOCK_PLL;
     if (HAL_I2S_Init(&hi2s1) != HAL_OK) {
-        return 1;
+        error_reporter->Report("HAL_I2S_Init fail");
     }
-    return 0;
 }
 
-void audio_record(int16_t *output, int32_t length) {
+void AudioRecorder::record(int16_t *output, int32_t length) {
     uint16_t data_in[4];
     int i = 0;
     while (i < length) {

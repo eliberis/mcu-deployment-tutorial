@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "tensorflow/lite/micro/examples/micro_speech/audio_provider.h"
 #include "tensorflow/lite/micro/examples/micro_speech/micro_features/micro_features_generator.h"
-#include "tensorflow/lite/micro/examples/micro_speech/micro_features/micro_model_settings.h"
+#include "model_settings.h"
 
 FeatureProvider::FeatureProvider(int feature_size, uint8_t* feature_data)
     : feature_size_(feature_size),
