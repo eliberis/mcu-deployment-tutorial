@@ -269,6 +269,8 @@ class AudioProcessor(object):
         frame_step = settings['window_stride_samples']
         num_channels = settings['fingerprint_width']
         spectrogram_length = settings['spectrogram_length']
+        window_size_ms = (settings['window_size_samples'] * 1000) / sample_rate
+        window_step_ms = (settings['window_stride_samples'] * 1000) / sample_rate
 
         use_background = self.background_data is not None and (mode == 'training')
 
@@ -341,6 +343,7 @@ class AudioProcessor(object):
                 out_scale=1,	
                 out_type=tf.float32)	
             x = tf.multiply(micro_frontend, (10.0 / 256.0))
+            x = tf.expand_dims(x, axis=-1)
             return x, label
 
         data = data.map(load, num_parallel_calls=tf.data.experimental.AUTOTUNE).cache()
