@@ -27,18 +27,10 @@ import sys
 import tarfile
 import urllib
 
-import numpy as np
 import tensorflow as tf
 
+from tensorflow.python.ops import gen_audio_ops as audio_ops
 from tensorflow.python.util import compat
-
-# If it's available, load the specialized feature generator. If this doesn't
-# work, try building with bazel instead of running the Python script directly.
-try:
-    from tensorflow.lite.experimental.microfrontend.python.ops import \
-        audio_microfrontend_op as frontend_op  # pylint:disable=g-import-not-at-top
-except ImportError:
-    frontend_op = None
 
 MAX_NUM_WAVS_PER_CLASS = 2 ** 27 - 1  # ~134M
 SILENCE_LABEL = '_silence_'
@@ -63,8 +55,10 @@ class AudioProcessor(object):
     """Handles loading, partitioning, and preparing audio training data."""
     def __init__(self, data_url, data_dir, silence_percentage, unknown_percentage,
                  wanted_words, validation_percentage, testing_percentage, model_settings):
+        self.words_list = prepare_words_list(wanted_words)
         if data_dir:
             self.data_dir = data_dir
+            self.data_index = {'validation': [], 'testing': [], 'training': []}
             self.maybe_download_and_extract_dataset(data_url, data_dir)
             self.prepare_data_index(silence_percentage, unknown_percentage,
                                     wanted_words, validation_percentage,
@@ -170,9 +164,6 @@ class AudioProcessor(object):
           wanted_words: Labels of the classes we want to be able to recognize.
           validation_percentage: How much of the data set to use for validation.
           testing_percentage: How much of the data set to use for testing.
-        Returns:
-          Dictionary containing a list of file information for each set partition,
-          and a lookup map for each class to determine its numeric index.
         Raises:
           Exception: If expected files are not found.
         """
@@ -180,8 +171,7 @@ class AudioProcessor(object):
         random.seed(RANDOM_SEED)
         wanted_words_index = {}
         for index, wanted_word in enumerate(wanted_words):
-            wanted_words_index[wanted_word] = index + 2
-        self.data_index = {'validation': [], 'testing': [], 'training': []}
+            wanted_words_index[wanted_word] = self.words_list.index(wanted_word)
         unknown_index = {'validation': [], 'testing': [], 'training': []}
         all_words = {}
         # Look through all the subfolders to find audio samples
@@ -197,10 +187,11 @@ class AudioProcessor(object):
             set_index = self._which_set(wav_path, validation_percentage, testing_percentage)
             # If it's a known class, store its detail, otherwise add it to the list
             # we'll use to train the unknown label.
-            if word in wanted_words_index:
-                self.data_index[set_index].append((wav_path, word))
+            index = wanted_words_index.get(word)
+            if index:
+                self.data_index[set_index].append((wav_path, index))
             else:
-                unknown_index[set_index].append((wav_path, word))
+                unknown_index[set_index].append((wav_path, UNKNOWN_WORD_INDEX))
         if not all_words:
             raise Exception(f"No .wavs found at {search_path}")
         for index, wanted_word in enumerate(wanted_words):
@@ -214,7 +205,7 @@ class AudioProcessor(object):
             set_size = len(self.data_index[set_index])
             silence_size = int(math.ceil(set_size * silence_percentage / 100))
             for _ in range(silence_size):
-                self.data_index[set_index].append((silence_wav_path, SILENCE_LABEL))
+                self.data_index[set_index].append((silence_wav_path, SILENCE_INDEX))
             # Pick some unknowns to add to each partition of the data set.
             random.shuffle(unknown_index[set_index])
             unknown_size = int(math.ceil(set_size * unknown_percentage / 100))
@@ -222,15 +213,6 @@ class AudioProcessor(object):
         # Make sure the ordering is random.
         for set_index in ['validation', 'testing', 'training']:
             random.shuffle(self.data_index[set_index])
-        # Prepare the rest of the result data structure.
-        self.words_list = prepare_words_list(wanted_words)
-        self.word_to_index = {}
-        for word in all_words:
-            if word in wanted_words_index:
-                self.word_to_index[word] = wanted_words_index[word]
-            else:
-                self.word_to_index[word] = UNKNOWN_WORD_INDEX
-        self.word_to_index[SILENCE_LABEL] = SILENCE_INDEX
 
     def prepare_background_data(self):
         """Searches a folder for background noise audio, and loads it into memory.
@@ -241,24 +223,30 @@ class AudioProcessor(object):
         error, it's just taken to mean that no background noise augmentation should
         be used. If the folder does exist, but it's empty, that's treated as an
         error.
-        Returns:0.0,
-                                     0.0, 0, 'validation'
-          List of raw PCM-encoded audio samples of background noise.
         Raises:
           Exception: If files aren't found in the folder.
         """
-        self.background_data = []
+        background_data = []
+
         background_dir = os.path.join(self.data_dir, BACKGROUND_NOISE_DIR_NAME)
         if not tf.io.gfile.exists(background_dir):
-            return self.background_data
+            self.background_data = None
+            return
         search_path = os.path.join(self.data_dir, BACKGROUND_NOISE_DIR_NAME, '*.wav')
         for wav_path in tf.io.gfile.glob(search_path):
             wav_loader = tf.io.read_file(wav_path)
             wav_decoder = tf.audio.decode_wav(wav_loader, desired_channels=1)
             wav_data = wav_decoder.audio.numpy().flatten()
-            self.background_data.append(wav_data)
-        if not self.background_data:
+            background_data.append(wav_data)
+        if not background_data:
             raise Exception('No background wav files were found in ' + search_path)
+
+        def stack_ragged(tensors):
+            values = tf.concat(tensors, axis=0)
+            lens = tf.stack([tf.shape(t, out_type=tf.int64)[0] for t in tensors])
+            return tf.RaggedTensor.from_row_lengths(values, lens)
+
+        self.background_data = stack_ragged(background_data)
 
     def set_size(self, mode):
         """Calculates the number of samples in the dataset partition.
@@ -270,30 +258,31 @@ class AudioProcessor(object):
         return len(self.data_index[mode])
 
     def get_dataset(self, background_frequency, background_volume_range, time_shift, mode):
-        candidates = self.data_index[mode]
-
-        data = tf.data.Dataset.from_tensor_slices(candidates)
+        files = [f for f, l in self.data_index[mode]]
+        labels = [l for f, l in self.data_index[mode]]
+        data = tf.data.Dataset.from_tensor_slices((files, labels))
 
         settings = self.model_settings
         desired_samples = settings['desired_samples']
         sample_rate = settings['sample_rate']
-        window_size_ms = (settings['window_size_samples'] * 1000) / sample_rate
-        window_step_ms = (settings['window_stride_samples'] * 1000) / sample_rate
+        frame_length = settings['window_size_samples']
+        frame_step = settings['window_stride_samples']
         num_channels = settings['fingerprint_width']
         spectrogram_length = settings['spectrogram_length']
 
-        use_background = self.background_data and (mode == 'training')
+        use_background = self.background_data is not None and (mode == 'training')
 
-        if mode == "training":
-            data = data.shuffle(buffer_size=len(candidates) // 2)
+        def load(file, label):
+            # Load and augment the data file
+            wav_loader = tf.io.read_file(file)
+            wav_decoder = tf.audio.decode_wav(wav_loader, desired_channels=1,
+                                              desired_samples=desired_samples)
+            return wav_decoder.audio, label
 
-        def load(sample):
-            file, label = sample
-            label = label.numpy().decode("ascii")
-
+        def preprocess(audio, label):
             # If we're time shifting, set up the offset for this sample.
             if time_shift > 0:
-                time_shift_amount = np.random.randint(-time_shift, time_shift)
+                time_shift_amount = tf.random.uniform([], -time_shift, time_shift, dtype=tf.int32)
             else:
                 time_shift_amount = 0
             if time_shift_amount > 0:
@@ -304,94 +293,57 @@ class AudioProcessor(object):
                 time_shift_offset = [-time_shift_amount, 0]
 
             # Choose a section of background noise to mix in.
-            if use_background or label == SILENCE_LABEL:
-                background_index = np.random.randint(len(self.background_data))
+            if use_background or label == SILENCE_INDEX:
+                background_index = tf.random.uniform([], 0, self.background_data.shape[0], dtype=tf.int32)
                 background_samples = self.background_data[background_index]
-                if len(background_samples) <= desired_samples:
-                    raise ValueError(f"Background sample is too short! Need more than {desired_samples} samples but only"
-                                     f" {len(background_samples)} were found")
-                background_offset = np.random.randint(0, len(background_samples) - desired_samples)
+                background_offset = tf.random.uniform(
+                    [], 0, tf.shape(background_samples)[0] - desired_samples, dtype=tf.int32)
                 background_clipped = background_samples[background_offset:(background_offset + desired_samples)]
-                background_data = background_clipped.reshape([desired_samples, 1])
+                background_data = tf.reshape(background_clipped, [desired_samples, 1])
 
-                if label == SILENCE_LABEL:
-                    background_volume = np.random.uniform(0, 1)
-                elif np.random.uniform(0, 1) < background_frequency:
-                    background_volume = np.random.uniform(0, background_volume_range)
+                if label == SILENCE_INDEX:
+                    background_volume = tf.random.uniform([], 0, 1)
+                elif tf.random.uniform([], 0, 1) < background_frequency:
+                    background_volume = tf.random.uniform([], 0, background_volume_range)
                 else:
                     background_volume = 0.0
             else:
-                background_data = np.zeros([desired_samples, 1])
+                background_data = tf.zeros([desired_samples, 1])
                 background_volume = 0.0
 
             # If we want silence, mute out the main sample but leave the background.
-            foreground_volume = 0.0 if label == SILENCE_LABEL else 1.0
+            foreground_volume = 0.0 if label == SILENCE_INDEX else 1.0
 
-            # Load and augment the data file
-            wav_loader = tf.io.read_file(file)
-            wav_decoder = tf.audio.decode_wav(wav_loader, desired_channels=1, desired_samples=desired_samples)
             # Allow the audio sample's volume to be adjusted.
-            scaled_foreground = tf.multiply(wav_decoder.audio, foreground_volume)
+            scaled_foreground = tf.multiply(audio, foreground_volume)
             # Shift the sample's start position, and pad any gaps with zeros.
             padded_foreground = tf.pad(
                 tensor=scaled_foreground,
                 paddings=time_shift_padding,
                 mode='CONSTANT')
-            sliced_foreground = tf.slice(padded_foreground,
-                                         time_shift_offset,
+            sliced_foreground = tf.slice(padded_foreground, time_shift_offset,
                                          [desired_samples, -1])
+            sliced_foreground.set_shape((sliced_foreground.shape[0], 1))
 
             # Mix in background noise.
             background_volume = tf.cast(background_volume, tf.float32)
             background_mul = tf.multiply(background_data, background_volume)
             background_add = tf.add(background_mul, sliced_foreground)
             background_clamp = tf.clip_by_value(background_add, -1.0, 1.0)
-            int16_input = tf.cast(tf.multiply(background_clamp, 32768), tf.int16)
 
-            micro_frontend = frontend_op.audio_microfrontend(
-                int16_input,
-                sample_rate=sample_rate,
-                window_size=window_size_ms,
-                window_step=window_step_ms,
-                num_channels=num_channels,
-                out_scale=1,
-                out_type=tf.float32)
-            return tf.multiply(micro_frontend, (10.0 / 256.0)), self.word_to_index[label]
+            spectrogram = audio_ops.audio_spectrogram(
+                background_clamp,
+                window_size=frame_length,
+                stride=frame_step,
+                magnitude_squared=True)
+            x = audio_ops.mfcc(spectrogram, sample_rate, dct_coefficient_count=num_channels,
+                               upper_frequency_limit=7500, lower_frequency_limit=20)
+            x = tf.reshape(x, (spectrogram_length, num_channels, 1))
+            return x, label
 
-        def apply_preprocessing(i):
-            x, y = tf.py_function(load, [i], [tf.float32, tf.int32])
-            x.set_shape((spectrogram_length, num_channels))
-            y.set_shape(())
-            x = tf.expand_dims(x, axis=-1)
-            return x, y
-
-        data = data.map(apply_preprocessing, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        data = data.map(load, num_parallel_calls=tf.data.experimental.AUTOTUNE).cache()
+        data = data.map(preprocess, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         return data
-
-    def load_sample(self, file, foreground_volume=1.0, sample_rate=None):
-        settings = self.model_settings
-        if sample_rate is None:
-            sample_rate = settings['sample_rate']
-        window_size_ms = (settings['window_size_samples'] * 1000) / sample_rate
-        window_step_ms = (settings['window_stride_samples'] * 1000) / sample_rate
-        num_channels = settings['fingerprint_width']
-
-        wav_loader = tf.io.read_file(file)
-        wav_decoder = tf.audio.decode_wav(wav_loader, desired_channels=1)
-        scaled_foreground = tf.multiply(wav_decoder.audio, foreground_volume)
-        clipped_foreground = tf.clip_by_value(scaled_foreground, -1.0, 1.0)
-        int16_input = tf.cast(tf.multiply(clipped_foreground, 32768), tf.int16)
-
-        micro_frontend = frontend_op.audio_microfrontend(
-                int16_input,
-                sample_rate=sample_rate,
-                window_size=window_size_ms,
-                window_step=window_step_ms,
-                num_channels=num_channels,
-                out_scale=1,
-                out_type=tf.float32)
-        spectrogram = tf.multiply(micro_frontend, (10.0 / 256.0))
-        return tf.expand_dims(spectrogram, axis=-1)
 
 
 class SpeechDataset:
@@ -402,12 +354,12 @@ class SpeechDataset:
                  clip_duration_ms=1000,
                  feature_bin_count=40,
                  sample_rate=16000,
-                 silence_percentage=25,
-                 unknown_percentage=25,
+                 silence_percentage=10,
+                 unknown_percentage=10,
                  validation_percentage=10,
                  testing_percentage=10,
-                 window_size_ms=30.0,
-                 window_stride=20):
+                 window_size_ms=40.0,
+                 window_stride=20.0):
         wanted_words = words if words is not None else ["yes", "no"]
         self.prepared_words_list = prepare_words_list(wanted_words)
         self.model_settings = \
@@ -457,7 +409,7 @@ class SpeechDataset:
     def testing_dataset(self, time_shift_ms=0.0, background_frequency=0.0, background_volume=0.0):
         time_shift_samples = int((time_shift_ms * self.model_settings['sample_rate']) / 1000)
         return self.audio_processor.get_dataset(background_frequency, background_volume,
-                                                time_shift_samples, 'validation')
+                                                time_shift_samples, 'testing')
 
     def sample_shape(self):
         input_frequency_size = self.model_settings['fingerprint_width']
@@ -472,6 +424,3 @@ class SpeechDataset:
 
     def load_sample(self, file, foreground_volume=1.0, sample_rate=None):
         return self.audio_processor.load_sample(file, foreground_volume, sample_rate)
-
-if __name__ == "__main__":
-    pass
