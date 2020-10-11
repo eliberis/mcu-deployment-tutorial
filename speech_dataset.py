@@ -30,8 +30,7 @@ import urllib
 import tensorflow as tf
 
 from tensorflow.python.util import compat
-from tensorflow.lite.experimental.microfrontend.python.ops import \	
-    audio_microfrontend_op as frontend_op
+from tensorflow.lite.experimental.microfrontend.python.ops import audio_microfrontend_op as frontend_op
 
 MAX_NUM_WAVS_PER_CLASS = 2 ** 27 - 1  # ~134M
 SILENCE_LABEL = '_silence_'
