@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2018 Arm Limited or its affiliates. All rights reserved.
+ * Copyright (C) 2010-2020 Arm Limited or its affiliates. All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -21,14 +21,14 @@
  * Title:        arm_q7_to_q15_with_offset.c
  * Description:  Converts the elements of the Q7 vector to Q15 vector with an added offset
  *
- * $Date:        July 2019
- * $Revision:    V.1.0.0
+ * $Date:        March 3, 2020
+ * $Revision:    V.2.0.2
  *
  * Target Processor:  Cortex-M cores
  *
  * -------------------------------------------------------------------- */
 
-#include "arm_nnsupportfunctions.h"
+#include "cmsis/CMSIS/NN/Include/arm_nnsupportfunctions.h"
 
 /**
  * @ingroup groupSupport
@@ -42,7 +42,7 @@
 void arm_q7_to_q15_with_offset(const q7_t *src,
                                q15_t *dst,
                                uint32_t block_size,
-                               q7_t offset)
+                               q15_t offset)
 {
     int block_cnt;
 
@@ -64,7 +64,7 @@ void arm_q7_to_q15_with_offset(const q7_t *src,
 
     block_cnt = block_size & 0x7;
 
-#elif defined(ARM_MATH_LOOPUNROLL) && defined(ARM_MATH_DSP)
+#elif defined(ARM_MATH_DSP)
     /* Run the below code for cores that support SIMD instructions  */
     q31_t in_q7x4;
     q31_t in_q15x2_1;
@@ -76,22 +76,18 @@ void arm_q7_to_q15_with_offset(const q7_t *src,
     block_cnt = block_size >> 2;
 
     /* First part of the processing with loop unrolling.  Compute 4 outputs at a time. */
+    const q31_t offset_q15x2 = __PKHBT(offset, offset, 16);
     while (block_cnt > 0)
     {
         /* convert from q7 to q15 and then store the results in the destination buffer */
         in_q7x4 = arm_nn_read_q7x4_ia(&src);
-        q31_t offset_q15x2 = (offset << 16l) | offset;
 
         /* Extract and sign extend each of the four q7 values to q15 */
-        in_q15x2_1 = __SXTB16(__ROR(in_q7x4, 8));
-        in_q15x2_2 = __SXTB16(in_q7x4);
+        in_q15x2_1 = __SXTAB16(offset_q15x2, __ROR(in_q7x4, 8));
+        in_q15x2_2 = __SXTAB16(offset_q15x2, in_q7x4);
 
         out_q15x2_2 = __PKHTB(in_q15x2_1, in_q15x2_2, 16);
-        /* Maximum of 9 bits from the addition is expected */
-        out_q15x2_2 = __SADD16(out_q15x2_2, offset_q15x2);
-
         out_q15x2_1 = __PKHBT(in_q15x2_2, in_q15x2_1, 16);
-        out_q15x2_1 = __SADD16(out_q15x2_1, offset_q15x2);
 
         write_q15x2_ia(&dst, out_q15x2_1);
         write_q15x2_ia(&dst, out_q15x2_2);
@@ -107,7 +103,7 @@ void arm_q7_to_q15_with_offset(const q7_t *src,
     block_cnt = block_size;
 #endif
 
-    while (block_cnt > 0u)
+    while (block_cnt > 0)
     {
         *dst++ = (q15_t)*src++ + offset;
 

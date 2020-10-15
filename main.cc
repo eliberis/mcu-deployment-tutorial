@@ -64,7 +64,7 @@ TfLiteStatus GetAudioSamples(tflite::ErrorReporter* error_reporter,
 }
 
 void infer() {
-    uint8_t *output = engine->invoke();
+    int8_t *output = engine->invoke();
     if (output == nullptr) {
         return;
     }
@@ -73,7 +73,7 @@ void infer() {
     int current_top_index = 0;
     int32_t current_top_score = 0;
     for (int i = 0; i < kCategoryCount; ++i) {
-        uint8_t score = output[i];
+        int8_t score = output[i];
         error_reporter->Report("%s: %d", kCategoryLabels[i], score);
         if (score > current_top_score) {
             current_top_score = score;

@@ -22,25 +22,16 @@ AudioInference::AudioInference(const unsigned char* model_data,
     //
     // tflite::ops::micro::AllOpsResolver resolver;
     // NOLINTNEXTLINE(runtime-global-variables)
-    static tflite::MicroOpResolver<6> micro_op_resolver;
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_DEPTHWISE_CONV_2D,
-            tflite::ops::micro::Register_DEPTHWISE_CONV_2D());
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_CONV_2D,
-            tflite::ops::micro::Register_CONV_2D());
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_MAX_POOL_2D,
-            tflite::ops::micro::Register_MAX_POOL_2D());
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_RESHAPE,
-            tflite::ops::micro::Register_RESHAPE());
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_FULLY_CONNECTED,
-            tflite::ops::micro::Register_FULLY_CONNECTED());
-    micro_op_resolver.AddBuiltin(
-            tflite::BuiltinOperator_SOFTMAX,
-            tflite::ops::micro::Register_SOFTMAX());
+    static tflite::MicroMutableOpResolver<6> micro_op_resolver(error_reporter);
+    if (micro_op_resolver.AddDepthwiseConv2D() != kTfLiteOk ||
+        micro_op_resolver.AddFullyConnected() != kTfLiteOk ||
+        micro_op_resolver.AddSoftmax() != kTfLiteOk ||
+        micro_op_resolver.AddReshape() != kTfLiteOk ||
+        micro_op_resolver.AddConv2D() != kTfLiteOk ||
+        micro_op_resolver.AddMaxPool2D() != kTfLiteOk) {
+        error_reporter->Report("Operator registration failed.");
+        return;
+    }
 
     // Build an interpreter to run the model with.
     static tflite::MicroInterpreter static_interpreter(
@@ -57,22 +48,22 @@ AudioInference::AudioInference(const unsigned char* model_data,
     // Get information about the memory area to use for the model's input.
     this->model_input = interpreter->input(0);
     if ((model_input->dims->size != 4) || (model_input->dims->data[0] != 1) ||
-            (model_input->dims->data[1] != kFeatureSliceCount) ||
-            (model_input->dims->data[2] != kFeatureSliceSize) ||
-            (model_input->type != kTfLiteUInt8)) {
-        error_reporter->Report("Bad input tensor parameters in model");
+        (model_input->dims->data[1] != kFeatureSliceCount) ||
+        (model_input->dims->data[2] != kFeatureSliceSize) ||
+        (model_input->type != kTfLiteInt8)) {
+        TF_LITE_REPORT_ERROR(error_reporter, "Bad input tensor parameters in model");
         return;
     }
 
     // Prepare to access the audio spectrograms from a microphone or other source
     // that will provide the inputs to the neural network.
     // NOLINTNEXTLINE(runtime-global-variables)
-    static FeatureProvider static_feature_provider(kFeatureElementCount, model_input->data.uint8);
+    static FeatureProvider static_feature_provider(kFeatureElementCount, model_input->data.int8);
     this->feature_provider = &static_feature_provider;
 }
 
 
-uint8_t* AudioInference::invoke() {
+int8_t* AudioInference::invoke() {
 	// Fetch the spectrogram.
     int how_many_new_slices = 0;
     TfLiteStatus feature_status = feature_provider->PopulateFeatureData(
@@ -103,12 +94,12 @@ uint8_t* AudioInference::invoke() {
         return nullptr;
     }
 
-    if (output->type != kTfLiteUInt8) {
+    if (output->type != kTfLiteInt8) {
         error_reporter->Report(
-                "The results for recognition should be uint8 elements, but are %d",
+                "The results for recognition should be int8 elements, but are %d",
                 output->type);
         return nullptr;
     }
 
-    return output->data.uint8;
+    return output->data.int8;
 }

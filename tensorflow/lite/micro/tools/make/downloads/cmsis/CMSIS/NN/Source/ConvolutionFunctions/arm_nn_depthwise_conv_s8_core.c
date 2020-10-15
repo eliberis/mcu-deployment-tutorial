@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2019 Arm Limited or its affiliates. All rights reserved.
+ * Copyright (C) 2010-2020 Arm Limited or its affiliates. All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -21,14 +21,14 @@
  * Title:        arm_nn_depthwise_conv_s8_core.c
  * Description:  Depthwise convolution on im2col buffers.
  *
- * $Date:        November 2019
- * $Revision:    V.1.0.0
+ * $Date:        March 3, 2020
+ * $Revision:    V.1.0.2
  *
  * Target Processor:  Cortex-M cores
  * -------------------------------------------------------------------- */
 
-#include "arm_math.h"
-#include "arm_nnfunctions.h"
+#include "cmsis/CMSIS/DSP/Include/arm_math.h"
+#include "cmsis/CMSIS/NN/Include/arm_nnfunctions.h"
 
 /*
    * Depthwise conv on an im2col buffer where the input channel equals
@@ -70,7 +70,7 @@ q7_t *arm_nn_depthwise_conv_s8_core(const q7_t *row,
         const int32_t offset = idx * 4;
         const int8_t *row_0 = row + offset;
         const int16_t *col_0 = col + offset;
-        const int16_t *col_1 = col + kernel_size * num_ch;
+        const int16_t *col_1 = col + kernel_size * num_ch + offset;
 
         int32x4_t ker_0 = vldrbq_s32(row_0);
 
@@ -166,15 +166,15 @@ q7_t *arm_nn_depthwise_conv_s8_core(const q7_t *row,
             const int16_t *col_pos_0 = col + ch_idx;
             const int16_t *col_pos_1 = col_pos_0 + single_buffer_size;
 
-            const int8_t *row_pos_0 = row + ch_idx;
-            const int8_t *row_pos_1 = row_pos_0;
+            const int8_t *row_pos = row + ch_idx;
             int32_t sum_0 = bias[i];
             int32_t sum_1 = bias[i];
 
-            for (int i = 0; i < kernel_size; i++)
+            for (int j = 0; j < kernel_size; j++)
             {
-                sum_0 += row_pos_0[i * num_ch] * col_pos_0[i * num_ch];
-                sum_1 += row_pos_1[i * num_ch] * col_pos_1[i * num_ch];
+                const int8_t row_val = row_pos[j * num_ch];
+                sum_0 += row_val * col_pos_0[j * num_ch];
+                sum_1 += row_val * col_pos_1[j * num_ch];
             }
             col_0_sum[i] = sum_0;
             col_1_sum[i] = sum_1;

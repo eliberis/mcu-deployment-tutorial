@@ -22,5 +22,5 @@ public:
 	AudioInference(const unsigned char* model_data, 
                    uint8_t* tensor_arena, const int kTensorArenaSize, 
                    tflite::ErrorReporter* error_reporter);
-	uint8_t* invoke();
+	int8_t* invoke();
 };
