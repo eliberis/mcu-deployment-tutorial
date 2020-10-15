@@ -8,18 +8,18 @@
 #include "audio_inference.h"
 #include "model_settings.h"
 
-
 namespace {
-
-tflite::ErrorReporter* error_reporter = nullptr;
-AudioInference *engine = nullptr;
-AudioRecorder *recorder = nullptr;
 
 // Create an area of memory to use for input, output, and intermediate arrays.
 // The size of this will depend on the model you're using, and may need to be
 // determined by experimentation.
 constexpr int kTensorArenaSize = 400 * 1024;
-uint8_t tensor_arena[kTensorArenaSize];
+__attribute__((aligned(16))) uint8_t tensor_arena[kTensorArenaSize];
+
+tflite::ErrorReporter* error_reporter = nullptr;
+AudioInference *engine = nullptr;
+AudioRecorder *recorder = nullptr;
+
 
 // We record for 1.2s, and discard the first 200ms 
 // (would be corrupted by board vibrations / human delay)
