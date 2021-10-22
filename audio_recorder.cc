@@ -17,16 +17,17 @@ AudioRecorder::AudioRecorder(tflite::ErrorReporter* error_reporter) {
     }
 
     // Enable GPIO port clock
-    __SPI1_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __SPI2_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    pin_function(PA_7, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
-    pin_function(PA_5, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
-    pin_function(PA_4, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI3));
+    pin_function(PB_10, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI2));
+    pin_function(PB_12, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI2));
+    pin_function(PC_1, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI2));
+    pin_function(PC_6, STM_PIN_DATA(STM_MODE_AF_PP, GPIO_NOPULL, GPIO_AF5_SPI2));
 
     // Set up I2S handles
-    hi2s1.Instance = SPI1;
+    hi2s1.Instance = SPI2;
     hi2s1.Init.Mode = I2S_MODE_MASTER_RX;
     hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
     hi2s1.Init.DataFormat = I2S_DATAFORMAT_24B;
